@@ -2,7 +2,6 @@ import streamlit as st
 import tensorflow as tf
 import numpy as np
 from PIL import Image
-import cv2
 import time
 import os
 
@@ -161,6 +160,7 @@ with st.sidebar:
     st.markdown("**Kategori**")
     st.markdown("🌿 **Organik** — Sisa makanan, daun, kertas\n\n🔴 **Anorganik** — Plastik, logam, kaca, baterai")
     st.markdown("<div class='custom-divider'></div>", unsafe_allow_html=True)
+
     st.caption("Dikembangkan oleh kelompok 10")
 
 
@@ -169,7 +169,7 @@ st.markdown('<div class="hero-title">EcoScan</div>', unsafe_allow_html=True)
 st.markdown('<div class="hero-sub">AI-Powered Waste Classification System</div>', unsafe_allow_html=True)
 
 if model is None:
-    st.error("Model belum ditemukan! Pastikan `model/waste_classifier.h5` sudah ada.")
+    st.error("Model belum ditemukan! Pastikan `model/waste_classifier_final.keras` sudah ada.")
     st.stop()
 else:
     st.success("Model loaded — Siap mengklasifikasikan sampah!")
@@ -180,89 +180,33 @@ tab1, tab2 = st.tabs(["Kamera Live", "Upload Gambar"])
 
 # ── TAB 1: LIVE CAMERA ───────────────────────────────────────────────────────
 with tab1:
-    st.markdown('<div class="live-badge"><span class="live-dot"></span> LIVE — Prediksi otomatis setiap frame</div>', unsafe_allow_html=True)
-    st.caption("Arahkan kamera ke sampah. Hasil klasifikasi muncul otomatis secara real-time.")
+    st.markdown('<div class="live-badge"><span class="live-dot"></span> LIVE — Ambil foto untuk prediksi instan</div>', unsafe_allow_html=True)
+    st.caption("Arahkan kamera ke sampah, lalu ambil foto. Hasil klasifikasi muncul otomatis setelah foto diambil.")
 
     col_cam, col_result = st.columns([3, 2], gap="large")
 
     with col_cam:
-        frame_placeholder = st.empty()
+        camera_photo = st.camera_input("Ambil foto sampah", label_visibility="collapsed")
+
     with col_result:
-        result_placeholder = st.empty()
-
-    c1, c2 = st.columns(2)
-    with c1:
-        start_btn = st.button("▶ Mulai Kamera", type="primary", use_container_width=True)
-    with c2:
-        stop_btn = st.button("⏹ Stop Kamera", use_container_width=True)
-
-    if "camera_running" not in st.session_state:
-        st.session_state.camera_running = False
-    if start_btn:
-        st.session_state.camera_running = True
-    if stop_btn:
-        st.session_state.camera_running = False
-
-    if st.session_state.camera_running:
-        cap = cv2.VideoCapture(0)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-
-        if not cap.isOpened():
-            st.error("❌ Kamera tidak dapat dibuka.")
-            st.session_state.camera_running = False
+        if camera_photo is not None:
+            img = Image.open(camera_photo)
+            with st.spinner("🔍 Menganalisis gambar..."):
+                is_organic, confidence, raw_pred = predict(img)
+            render_result(is_organic, confidence)
+            st.markdown("<br>", unsafe_allow_html=True)
+            m1, m2 = st.columns(2)
+            with m1: st.metric("Raw Score", f"{raw_pred:.4f}")
+            with m2: st.metric("Threshold", "0.5000")
         else:
-            frame_count      = 0
-            last_is_organic  = None
-            last_confidence  = 0.0
-
-            while st.session_state.camera_running:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-
-                frame_rgb = cv2.cvtColor(cv2.flip(frame, 1), cv2.COLOR_BGR2RGB)
-
-                # Prediksi setiap 10 frame
-                if frame_count % 10 == 0:
-                    pil_img = Image.fromarray(frame_rgb)
-                    last_is_organic, last_confidence, _ = predict(pil_img)
-
-                # Overlay label pada frame
-                if last_is_organic is not None:
-                    label_text = f"{'ORGANIK' if last_is_organic else 'ANORGANIK'}  {last_confidence:.1f}%"
-                    color      = (46, 125, 50)   if last_is_organic else (230, 81, 0)
-                    bg_color   = (232, 245, 233) if last_is_organic else (255, 243, 224)
-                    cv2.rectangle(frame_rgb, (10, 10), (460, 65), bg_color, -1)
-                    cv2.rectangle(frame_rgb, (10, 10), (460, 65), color, 2)
-                    cv2.putText(frame_rgb, label_text, (22, 50),
-                                cv2.FONT_HERSHEY_SIMPLEX, 1.1, color, 2, cv2.LINE_AA)
-
-                frame_placeholder.image(frame_rgb, channels="RGB", use_column_width=True)
-
-                # Update panel hasil
-                if frame_count % 10 == 0 and last_is_organic is not None:
-                    with result_placeholder.container():
-                        render_result(last_is_organic, last_confidence)
-
-                frame_count += 1
-                time.sleep(0.01)
-
-            cap.release()
-    else:
-        empty_html = lambda icon, text: f"""
-        <div style="min-height:380px;border:2px dashed #c8e6c9;border-radius:16px;
-                    display:flex;align-items:center;justify-content:center;
-                    flex-direction:column;gap:1rem;background:#f9fbf9;color:#8aaa8a;">
-            <div style="font-size:3.5rem;">{icon}</div>
-            <div style="font-size:0.92rem;">{text}</div>
-        </div>"""
-        frame_placeholder.markdown(
-            empty_html("📷", "Klik <b style='color:#2e7d32'>▶ Mulai Kamera</b> untuk memulai"),
-            unsafe_allow_html=True)
-        result_placeholder.markdown(
-            empty_html("🔍", "Hasil klasifikasi muncul di sini"),
-            unsafe_allow_html=True)
+            empty_html = """
+            <div style="min-height:380px;border:2px dashed #c8e6c9;border-radius:16px;
+                        display:flex;align-items:center;justify-content:center;
+                        flex-direction:column;gap:1rem;background:#f9fbf9;color:#8aaa8a;">
+                <div style="font-size:3.5rem;">🔍</div>
+                <div style="font-size:0.92rem;">Hasil klasifikasi muncul di sini</div>
+            </div>"""
+            st.markdown(empty_html, unsafe_allow_html=True)
 
 
 # ── TAB 2: UPLOAD ────────────────────────────────────────────────────────────
